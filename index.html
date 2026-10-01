@@ -348,8 +348,11 @@ function drawPodium(ctx) {
       fitFont(ctx, '@' + s.handle, p.w - 16, 32, false, 18); ctx.fillText('@' + s.handle, cx, top - 20);
     }
   }
-  ctx.fillStyle = RED; ctx.fillRect(0, FLOOR, W, 8);
-  drawChecker(ctx, FLOOR + 22, 2, 24, .14);
+  // championship banner on the red floor band
+  ctx.fillStyle = RED; ctx.fillRect(0, FLOOR, W, 66);
+  ctx.fillStyle = '#fff'; fitFont(ctx, 'EUPEN CHAMPIONSHIP SERIES  ·  #ECS', 980, 40, true);
+  ctx.fillText('EUPEN CHAMPIONSHIP SERIES  ·  #ECS', W / 2, FLOOR + 47);
+  drawChecker(ctx, FLOOR + 80, 2, 24, .14);
 }
 
 function drawDotd(ctx) {
