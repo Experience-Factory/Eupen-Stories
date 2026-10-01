@@ -27,6 +27,10 @@ nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 16px 4px}
 nav button{font-family:EFB;font-size:17px;padding:14px 8px;border-radius:12px;border:2px solid var(--line);
   background:var(--panel);color:var(--muted)}
 nav button.on{border-color:var(--red);background:var(--red);color:#fff}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--panel);padding:5px;border-radius:12px;margin-top:4px}
+.seg button{font-family:EFB;font-size:16px;padding:11px 6px;border-radius:9px;border:0;background:transparent;color:var(--muted)}
+#cPerf.on{background:var(--red);color:#fff}
+#cChal.on{background:#fff;color:#101212}
 .preview{padding:14px 16px;display:flex;justify-content:center}
 .preview canvas{width:min(62vw,300px);aspect-ratio:9/16;height:auto;border-radius:14px;box-shadow:0 8px 30px #000a;background:#000}
 .wrap{padding:0 16px;max-width:560px;margin:0 auto}
@@ -87,6 +91,10 @@ details li{margin-bottom:8px}
 
 <div class="wrap">
   <section id="formPodium">
+    <div class="seg" role="group" aria-label="Catégorie">
+      <button id="cPerf" class="on">Performance</button>
+      <button id="cChal">Challenger</button>
+    </div>
     <label class="f" for="week">Semaine</label>
     <input type="text" id="week" autocomplete="off">
     <div id="podCards"></div>
@@ -150,18 +158,22 @@ const IMG = {};
 
 // ---------- state ----------
 const newSlot = () => ({ img: null, zoom: 1, ox: 0, oy: 0, name: '', handle: '' });
+const CATS = { performance: 'PERFORMANCE', challenger: 'CHALLENGER' };   // Tuesday Championship categories
+const newPods = () => ({ performance: [newSlot(), newSlot(), newSlot()], challenger: [newSlot(), newSlot(), newSlot()] });
 const S = {
-  mode: 'podium',
+  mode: 'podium', cat: 'performance',
   week: '', date: '',
-  podium: [newSlot(), newSlot(), newSlot()],   // P1, P2, P3
+  pods: newPods(),            // P1, P2, P3 for each category
   dotd: [newSlot()],
+  get podium() { return this.pods[this.cat]; },
 };
 const STORE = 'ef-eupen-stories-v1';
 function saveText() {
   try {
     localStorage.setItem(STORE, JSON.stringify({
-      day: defaultDate(), mode: S.mode, week: S.week, date: S.date,
-      podium: S.podium.map(s => ({ name: s.name, handle: s.handle })),
+      day: defaultDate(), mode: S.mode, cat: S.cat, week: S.week, date: S.date,
+      performance: S.pods.performance.map(s => ({ name: s.name, handle: s.handle })),
+      challenger: S.pods.challenger.map(s => ({ name: s.name, handle: s.handle })),
       dotd: S.dotd.map(s => ({ name: s.name, handle: s.handle })),
     }));
   } catch (e) {}
@@ -171,10 +183,12 @@ function loadText() {
     const d = JSON.parse(localStorage.getItem(STORE) || 'null');
     if (!d) return;
     S.mode = d.mode === 'dotd' ? 'dotd' : 'podium';
+    S.cat = d.cat === 'challenger' ? 'challenger' : 'performance';
     if (d.day !== defaultDate()) return;   // keep drafts for the same day only
     S.mode = d.mode === 'dotd' ? 'dotd' : 'podium';
     S.week = d.week || ''; S.date = d.date || '';
-    (d.podium || []).forEach((v, i) => { if (S.podium[i]) Object.assign(S.podium[i], v); });
+    for (const c of Object.keys(CATS))
+      (d[c] || []).forEach((v, i) => { if (S.pods[c][i]) Object.assign(S.pods[c][i], v); });
     (d.dotd || []).forEach((v, i) => { if (S.dotd[i]) Object.assign(S.dotd[i], v); });
   } catch (e) {}
 }
@@ -282,14 +296,22 @@ function drawPodium(ctx) {
   // title
   ctx.fillStyle = '#fff'; fitFont(ctx, 'PODIUM', 960, 190, true); ctx.fillText('PODIUM', W / 2, 545);
   ctx.fillStyle = RED; ctx.font = font(78, true); ctx.fillText('OF THE WEEK', W / 2, 628);
-  // week pill
-  const wk = (S.week || '').trim().toUpperCase();
+  // category tag (filled: red = Performance, white = Challenger) + week pill, side by side
+  const cat = CATS[S.cat], wk = (S.week || '').trim().toUpperCase();
+  ctx.font = font(40, true);
+  const cw = ctx.measureText(cat).width + 70;
+  fitFont(ctx, wk, 420, 38, true);
+  const ww = wk ? ctx.measureText(wk).width + 70 : 0, gap = wk ? 18 : 0;
+  let x = (W - cw - gap - ww) / 2;
+  ctx.fillStyle = S.cat === 'performance' ? RED : '#fff';
+  para(ctx, x, 656, cw, 58, 10); ctx.fill();
+  ctx.fillStyle = S.cat === 'performance' ? '#fff' : BLACK; ctx.font = font(40, true);
+  ctx.fillText(cat, x + cw / 2, 699);
   if (wk) {
-    fitFont(ctx, wk, 700, 38, true);
-    const pw = ctx.measureText(wk).width + 70;
+    x += cw + gap;
     ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 3;
-    para(ctx, (W - pw) / 2, 656, pw, 58, 10); ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.fillText(wk, W / 2, 698);
+    para(ctx, x, 656, ww, 58, 10); ctx.stroke();
+    ctx.fillStyle = '#fff'; fitFont(ctx, wk, 420, 38, true); ctx.fillText(wk, x + ww / 2, 698);
   }
   glow(ctx, W / 2, 1150, 620, .38);
   // podium: P2 left, P1 centre, P3 right
@@ -393,7 +415,8 @@ function buildCards(mode) {
   const box = document.getElementById(mode === 'podium' ? 'podCards' : 'dotdCards');
   box.innerHTML = '';
   S[mode].forEach((s, i) => {
-    const [title, ring] = SLOTS[mode][i];
+    const [pos, ring] = SLOTS[mode][i];
+    const title = mode === 'podium' ? pos + ' · ' + (S.cat === 'performance' ? 'Performance' : 'Challenger') : pos;
     const card = document.createElement('div');
     card.className = 'card'; card.style.setProperty('--c', RINGS[ring][1]);
     card.innerHTML =
@@ -509,7 +532,7 @@ document.getElementById('edRedo').onclick = () => { const s = edSlot; closeEdito
 const toastEl = document.getElementById('toast'); let toastT = 0;
 function toast(msg) { toastEl.textContent = msg; toastEl.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => toastEl.classList.remove('show'), 2600); }
 function fileName() {
-  const tag = S.mode === 'podium' ? 'podium-' + (S.week || 'week') : 'driver-of-the-night-' + (S.date || 'day');
+  const tag = S.mode === 'podium' ? 'podium-' + S.cat + '-' + (S.week || 'week') : 'driver-of-the-night-' + (S.date || 'day');
   return 'ef-eupen-' + tag.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '') + '.jpg';
 }
 function getBlob() {
@@ -554,11 +577,19 @@ document.getElementById('reset').onclick = () => {
     return;
   }
   clearTimeout(resetArmed); resetArmed = 0; btn.textContent = 'Nouvelle story (tout effacer)';
-  S.podium = [newSlot(), newSlot(), newSlot()]; S.dotd = [newSlot()];
+  S.pods = newPods(); S.dotd = [newSlot()];
   S.week = defaultWeek(); S.date = defaultDate();
   document.getElementById('week').value = S.week; document.getElementById('date').value = S.date;
   buildCards('podium'); buildCards('dotd'); saveText(); render();
 };
+function setCat(c) {
+  S.cat = c;
+  document.getElementById('cPerf').classList.toggle('on', c === 'performance');
+  document.getElementById('cChal').classList.toggle('on', c === 'challenger');
+  buildCards('podium'); saveText(); render();
+}
+document.getElementById('cPerf').onclick = () => setCat('performance');
+document.getElementById('cChal').onclick = () => setCat('challenger');
 document.getElementById('tPodium').onclick = () => setMode('podium');
 document.getElementById('tDotd').onclick = () => setMode('dotd');
 const wk = document.getElementById('week'), dt = document.getElementById('date');
@@ -574,7 +605,7 @@ dt.addEventListener('input', () => { S.date = dt.value; saveText(); render(); })
   if (!S.week) S.week = defaultWeek();
   if (!S.date) S.date = defaultDate();
   wk.value = S.week; dt.value = S.date;
-  buildCards('podium'); buildCards('dotd');
+  buildCards('dotd'); setCat(S.cat);
   setMode(S.mode);
 })();
 })();
