@@ -72,6 +72,15 @@ details li{margin-bottom:8px}
 .zoom input{flex:1;accent-color:var(--red);height:32px}
 .modal .big{max-width:380px}
 .hidden{display:none!important}
+/* pilot autocomplete (ECS sign-up form, consenting drivers only) */
+.ac{position:relative}
+.sug{position:absolute;left:0;right:0;top:calc(100% - 6px);z-index:30;background:#0b0c0c;border:1px solid var(--red);
+  border-radius:10px;overflow:hidden;box-shadow:0 10px 26px #000c}
+.sug button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:11px 14px;border:0;
+  border-bottom:1px solid var(--line);background:transparent;color:var(--text);font-size:16px}
+.sug button:last-child{border-bottom:0}
+.sug button b{font-family:EFB;font-weight:700;letter-spacing:.3px}
+.sug button span{color:var(--muted);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .shot{position:fixed;inset:0;z-index:60;background:#000f;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px}
 .shot.open{display:flex}
 .shot img{max-height:72vh;max-width:100%;border-radius:10px;-webkit-touch-callout:default}
@@ -110,7 +119,7 @@ details li{margin-bottom:8px}
     <ol>
       <li>Pour chaque pilote, touche <b>Photo</b> et prends sa photo (ou choisis-la dans la galerie). Centre sa tête dans le rond, puis <b>OK</b>.</li>
       <li>Pas de photo ? Le pilote ne veut pas être photographié : laisse le casque, c'est prévu pour ça.</li>
-      <li>Écris le prénom et le nom, et son compte Instagram s'il en a un.</li>
+      <li>Commence à taper le nom : les pilotes inscrits via le formulaire apparaissent. Choisis le bon, son nom et son Instagram se remplissent tout seuls. Pas dans la liste ? Écris le prénom et le nom à la main (pas de tag).</li>
       <li>Touche <b>Enregistrer l'image</b> : choisis <b>Instagram</b> ou <b>Enregistrer l'image</b> (elle va dans ta galerie).</li>
       <li>Dans Instagram, crée une story avec cette image.</li>
       <li>Reviens ici, touche <b>Copier les @tags</b>. Dans la story, touche <b>Aa</b> et colle : les pilotes sont tagués. Tu peux rendre ce texte tout petit et le glisser dans un coin.</li>
@@ -191,6 +200,54 @@ function loadText() {
       (d[c] || []).forEach((v, i) => { if (S.pods[c][i]) Object.assign(S.pods[c][i], v); });
     (d.dotd || []).forEach((v, i) => { if (S.dotd[i]) Object.assign(S.dotd[i], v); });
   } catch (e) {}
+}
+
+// ---------- pilots (ECS Instagram form, published "Pilotes" tab: consenting drivers only) ----------
+const PILOTS_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRRYlqhTKUtGdnvy_G_XBEy3qR5i_6YB51lSjV4QkWXMUcVoDq9PR_i7l-1GWlS6TzEP4D8FG31HsSV/pub?gid=1324249879&single=true&output=csv';
+const PSTORE = 'ef-eupen-pilots-v1';
+let PILOTS = [];
+const fold = v => (v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+function csvRows(t) {   // small RFC 4180 parser (quoted fields, commas, CRLF)
+  const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (q) { if (c === '"') { if (t[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && t[i + 1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+    else f += c;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  return rows;
+}
+function parsePilots(t) {
+  const byName = new Map();
+  csvRows(t).slice(1).forEach(([full, ig, ok]) => {
+    full = (full || '').trim();
+    if (!full || fold(ok) !== 'oui') return;
+    // "BRAUNE Louise" -> last = leading all-caps words, first = the rest
+    const w = full.split(/\s+/), k = w.findIndex(x => x !== x.toUpperCase() || !/\p{L}/u.test(x));
+    const last = (k <= 0 ? w : w.slice(0, k)).join(' '), first = k <= 0 ? '' : w.slice(k).join(' ');
+    byName.set(fold(full), {   // later rows (newer answers) overwrite earlier ones
+      label: full, name: (first ? first + ' ' : '') + last, handle: cleanHandle(ig), key: fold(full),
+    });
+  });
+  return [...byName.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+async function loadPilots() {
+  try { PILOTS = parsePilots(localStorage.getItem(PSTORE) || ''); } catch (e) {}
+  try {
+    const r = await fetch(PILOTS_CSV, { cache: 'no-store' });
+    if (!r.ok) return;
+    const t = await r.text();
+    PILOTS = parsePilots(t);
+    try { localStorage.setItem(PSTORE, t); } catch (e) {}
+  } catch (e) {}   // offline: keep the cached list
+}
+function matchPilots(q) {
+  const toks = fold(q).split(' ').filter(Boolean);
+  if (!toks.length || fold(q).length < 2) return [];
+  return PILOTS.filter(p => toks.every(t => p.key.includes(t))).slice(0, 5);
 }
 
 // ---------- helpers ----------
@@ -424,7 +481,7 @@ function buildCards(mode) {
     card.className = 'card'; card.style.setProperty('--c', RINGS[ring][1]);
     card.innerHTML =
       '<h3>' + title + '</h3><div class="row"><div class="thumb"><canvas width="184" height="184"></canvas></div>' +
-      '<div class="fields"><input type="text" class="nm" placeholder="Prénom Nom" autocomplete="off" autocapitalize="words">' +
+      '<div class="fields"><div class="ac"><input type="text" class="nm" placeholder="Prénom Nom (tape pour chercher)" autocomplete="off" autocapitalize="words"><div class="sug hidden"></div></div>' +
       '<div class="at"><input type="text" class="ig" placeholder="compte Instagram (facultatif)" autocomplete="off" autocapitalize="none" spellcheck="false"></div>' +
       '<div class="btns"><button class="sbtn pri ph">Photo</button><button class="sbtn cr">Recadrer</button><button class="sbtn np">Sans photo</button></div>' +
       '</div></div>';
@@ -436,7 +493,31 @@ function buildCards(mode) {
       cr.classList.toggle('hidden', !s.img); np.classList.toggle('hidden', !s.img);
     };
     s._sync = sync; sync();
-    nm.addEventListener('input', () => { s.name = nm.value; saveText(); render(); });
+    const sug = card.querySelector('.sug');
+    const hideSug = () => { sug.classList.add('hidden'); sug.innerHTML = ''; };
+    const showSug = () => {
+      const list = matchPilots(nm.value);
+      if (!list.length) { hideSug(); return; }
+      sug.innerHTML = '';
+      list.forEach(p => {
+        const b = document.createElement('button'); b.type = 'button';
+        b.innerHTML = '<b></b><span></span>';
+        b.querySelector('b').textContent = p.label;
+        b.querySelector('span').textContent = p.handle ? '@' + p.handle : '';
+        // pointerdown fires before the input loses focus
+        b.addEventListener('pointerdown', e => {
+          e.preventDefault();
+          s.name = p.name; s.handle = p.handle;
+          nm.value = s.name; ig.value = s.handle;
+          hideSug(); saveText(); render();
+        });
+        sug.appendChild(b);
+      });
+      sug.classList.remove('hidden');
+    };
+    nm.addEventListener('input', () => { s.name = nm.value; saveText(); render(); showSug(); });
+    nm.addEventListener('focus', showSug);
+    nm.addEventListener('blur', () => setTimeout(hideSug, 150));
     ig.addEventListener('input', () => { s.handle = cleanHandle(ig.value); saveText(); render(); });
     ig.addEventListener('blur', () => { ig.value = s.handle; });
     card.querySelector('.ph').onclick = () => pickPhoto(s);
@@ -601,6 +682,7 @@ dt.addEventListener('input', () => { S.date = dt.value; saveText(); render(); })
 
 // ---------- boot ----------
 (async () => {
+  loadPilots();   // in the background: suggestions appear as soon as the list is in
   const [logo, track, helmet] = await Promise.all([loadImg(SRC.logo), loadImg(SRC.track), loadImg(SRC.helmet)]);
   Object.assign(IMG, { logo, track, helmet });
   try { await Promise.all([document.fonts.load('700 100px EFB'), document.fonts.load('400 100px EFR')]); } catch (e) {}
