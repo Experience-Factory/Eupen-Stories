@@ -203,7 +203,7 @@ function loadText() {
 }
 
 // ---------- pilots (ECS Instagram form, published "Pilotes" tab: consenting drivers only) ----------
-const PILOTS_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRRYlqhTKUtGdnvy_G_XBEy3qR5i_6YB51lSjV4QkWXMUcVoDq9PR_i7l-1GWlS6TzEP4D8FG31HsSV/pub?gid=1324249879&single=true&output=csv';
+const PILOTS_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQHFv7Zuq-8ngWvULGBXtVuyCk3XzOVOGRNxXax1ZtQVtXXqU1Lea3i3q_5hNnjVd0VGlJPQzEHaW8J/pub?gid=91917171&single=true&output=csv';
 const PSTORE = 'ef-eupen-pilots-v1';
 let PILOTS = [];
 const fold = v => (v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -222,7 +222,7 @@ function csvRows(t) {   // small RFC 4180 parser (quoted fields, commas, CRLF)
 }
 function parsePilots(t) {
   const byName = new Map();
-  csvRows(t).slice(1).forEach(([full, ig, ok]) => {
+  csvRows(t).slice(1).forEach(([full, ig, ok, photo]) => {
     full = (full || '').trim();
     if (!full || fold(ok) !== 'oui') return;
     // "BRAUNE Louise" -> last = leading all-caps words, first = the rest
@@ -230,6 +230,7 @@ function parsePilots(t) {
     const last = (k <= 0 ? w : w.slice(0, k)).join(' '), first = k <= 0 ? '' : w.slice(k).join(' ');
     byName.set(fold(full), {   // later rows (newer answers) overwrite earlier ones
       label: full, name: (first ? first + ' ' : '') + last, handle: cleanHandle(ig), key: fold(full),
+      photo: /^[\w-]{20,}$/.test((photo || '').trim()) ? photo.trim() : '',
     });
   });
   return [...byName.values()].sort((a, b) => a.label.localeCompare(b.label));
@@ -243,6 +244,19 @@ async function loadPilots() {
     PILOTS = parsePilots(t);
     try { localStorage.setItem(PSTORE, t); } catch (e) {}
   } catch (e) {}   // offline: keep the cached list
+}
+// photo sent through the ECS signup page (Apps Script only serves photos of consenting pilots)
+const PHOTO_API = 'https://script.google.com/macros/s/AKfycbyQiCv3Yo3lYLESkgjFTQrFxi-58CjfnQOoVjKw_GYhTFTBaIJMuDMYMtprSvBzR8ZH/exec';
+const photoCache = new Map();
+async function pilotPhoto(id) {
+  if (!photoCache.has(id)) {
+    photoCache.set(id, fetch(PHOTO_API + '?action=photo&id=' + encodeURIComponent(id))
+      .then(r => r.json()).then(d => (d.ok ? loadImg(d.data) : null))
+      .catch(() => null));
+  }
+  const im = await photoCache.get(id);
+  if (!im) photoCache.delete(id);   // retry next time (offline, cold start)
+  return im;
 }
 function matchPilots(q) {
   const toks = fold(q).split(' ').filter(Boolean);
@@ -510,6 +524,11 @@ function buildCards(mode) {
           s.name = p.name; s.handle = p.handle;
           nm.value = s.name; ig.value = s.handle;
           hideSug(); saveText(); render();
+          if (p.photo && !s.img) {   // never replace a photo already chosen for this slot
+            pilotPhoto(p.photo).then(im => {
+              if (im && !s.img && s.name === p.name) { setImg(s, im); toast('Photo de ' + p.name + ' ajoutée'); }
+            });
+          }
         });
         sug.appendChild(b);
       });
@@ -540,22 +559,24 @@ function setMode(m) {
 const file = document.getElementById('file');
 let pickTarget = null;
 function pickPhoto(s) { pickTarget = s; file.value = ''; file.click(); }
+function setImg(s, im) {
+  // downscale big phone photos (browsers apply EXIF orientation when drawing)
+  const k = Math.min(1, 1600 / Math.max(im.naturalWidth, im.naturalHeight));
+  const c = document.createElement('canvas');
+  c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+  c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+  s.img = c; s.zoom = 1; s.ox = 0;
+  // portraits: show the upper part first, where the head usually is
+  s.oy = c.height > c.width ? 0.4 * limits(s).y : 0;
+  s._sync && s._sync(); render();
+}
 file.addEventListener('change', async () => {
   const f = file.files && file.files[0];
   if (!f || !pickTarget) return;
   const url = URL.createObjectURL(f);
   try {
-    const im = await loadImg(url);
-    // downscale big phone photos (browsers apply EXIF orientation when drawing)
-    const k = Math.min(1, 1600 / Math.max(im.naturalWidth, im.naturalHeight));
-    const c = document.createElement('canvas');
-    c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
-    c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
     const s = pickTarget;
-    s.img = c; s.zoom = 1; s.ox = 0;
-    // portraits: show the upper part first, where the head usually is
-    s.oy = c.height > c.width ? 0.4 * limits(s).y : 0;
-    s._sync && s._sync(); render();
+    setImg(s, await loadImg(url));
     openEditor(s);
   } catch (e) { toast('Impossible de lire cette photo'); }
   finally { URL.revokeObjectURL(url); }
